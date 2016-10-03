@@ -66,7 +66,7 @@
 
 // This defines the number of extruders
 #ifndef EXTRUDERS
-#define EXTRUDERS 1
+#define EXTRUDERS 2
 #endif
 
 //// The following define selects which power supply you have. Please choose the one that matches your setup
@@ -182,7 +182,7 @@
 #ifndef HEATER_2_MAXTEMP
     #define HEATER_2_MAXTEMP 275
 #endif
-#define BED_MAXTEMP 200
+#define BED_MAXTEMP 115
 
 //Check if the heater heats up MAX_HEATING_TEMPERATURE_INCREASE within MAX_HEATING_CHECK_MILLIS while the PID was at the maximum.
 // If not, raise an error because most likely the heater is not heating up the temperature sensor. Indicating an issue in the system.
@@ -367,11 +367,11 @@ const bool Z_ENDSTOPS_INVERTING = true; // set to true to invert the logic of th
 #define min_software_endstops true // If true, axis won't move to coordinates less than HOME_POS.
 #define max_software_endstops true  // If true, axis won't move to coordinates greater than the defined lengths below.
 // Travel limits after homing
-#define X_MAX_POS 230
+#define X_MAX_POS 225
 #define X_MIN_POS 0
-#define Y_MAX_POS 230
-#define Y_MIN_POS 5
-#define Z_MAX_POS 330
+#define Y_MAX_POS 225
+#define Y_MIN_POS 0
+#define Z_MAX_POS 360
 #define Z_MIN_POS 0
 
 #define X_MAX_LENGTH (X_MAX_POS - X_MIN_POS)
@@ -394,11 +394,14 @@ const bool Z_ENDSTOPS_INVERTING = true; // set to true to invert the logic of th
 #define HOMING_FEEDRATE {100*60, 100*60, 40*60, 0}  // set the homing speeds (mm/min)
 
 // default settings
-#ifdef UM2PLUS
-#define DEFAULT_AXIS_STEPS_PER_UNIT   {80.0,80.0,200,369}  // default steps per unit for ultimaker2.1 JarJar
-#else
-#define DEFAULT_AXIS_STEPS_PER_UNIT   {80.0,80.0,200,282}  // default steps per unit for ultimaker2
-#endif
+//#ifdef UM2PLUS
+//#define DEFAULT_AXIS_STEPS_PER_UNIT   {80.0,80.0,200,369}  // default steps per unit for ultimaker2.1 JarJar
+//#else
+//#define DEFAULT_AXIS_STEPS_PER_UNIT   {80.0,80.0,200,282}  // default steps per unit for ultimaker2
+//#endif
+
+#define DEFAULT_AXIS_STEPS_PER_UNIT   {83.85*2,82.21*2.0,202.94,514} // DRV8825 steppers
+
 #define DEFAULT_MAX_FEEDRATE          {300, 300, 40, 45}    // (mm/sec)
 #define DEFAULT_MAX_ACCELERATION      {9000,9000,100,10000}    // X, Y, Z, E maximum start speed for accelerated moves. E default values are good for skeinforge 40+, for older versions raise them a lot.
 
