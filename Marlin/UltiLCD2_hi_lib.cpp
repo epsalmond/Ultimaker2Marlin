@@ -19,8 +19,11 @@ int16_t lcd_setting_min;
 int16_t lcd_setting_max;
 int16_t lcd_setting_start_value;
 
+uint16_t lineEntryPos  = 0;
+int8_t   lineEntryWait = 0;
+
 uint8_t heater_timeout = 3;
-int backup_temperature[EXTRUDERS] = { 0 };
+uint16_t backup_temperature[EXTRUDERS] = { 0 };
 
 //Arduino IDE compatibility, lacks the eeprom_read_float function
 float eeprom_read_float(const float* addr)
@@ -36,6 +39,30 @@ void eeprom_write_float(const float* addr, float f)
     n.f = f;
     eeprom_write_dword((uint32_t*)addr, n.i);
 }
+
+void line_entry_pos_update (uint16_t maxStep)
+{
+	if (lineEntryPos > maxStep) lineEntryPos = 0;
+	//
+	lineEntryWait++;
+	if (lineEntryWait >= LINE_ENTRY_WAIT_END)
+	{
+		lineEntryWait = LINE_ENTRY_WAIT_END;
+		lineEntryPos += LINE_ENTRY_STEP;
+		if (lineEntryPos > maxStep)
+		{
+			lineEntryPos  = maxStep;
+			lineEntryWait = -lineEntryWait;
+		}
+	}
+	else if (lineEntryWait == 0 && lineEntryPos > 0)
+	{
+		lineEntryPos -= LINE_ENTRY_STEP;
+		lineEntryWait--;
+	}
+}
+
+inline void line_entry_pos_reset () { lineEntryPos = lineEntryWait = 0; }
 
 void lcd_tripple_menu(const char* left, const char* right, const char* bottom)
 {
@@ -175,14 +202,39 @@ void lcd_progressbar(uint8_t progress)
 
 void lcd_draw_scroll_entry(uint8_t offsetY, char * buffer, uint8_t flags)
 {
-    if (flags & MENU_SELECTED)
+	uint8_t buffer_len = (uint8_t) strlen(buffer);
+	char    backup     = '\0';
+	uint8_t backup_pos = 0;
+	if (flags & MENU_SELECTED)
+	{
+		if ((ui_mode & UI_SCROLL_ENTRY) && (buffer_len > LINE_ENTRY_TEXT_LENGHT))
+		{
+			line_entry_pos_update(LINE_ENTRY_MAX_STEP(buffer_len - LINE_ENTRY_TEXT_LENGHT));
+			buffer    += LINE_ENTRY_TEXT_BEGIN();
+			backup_pos = LINE_ENTRY_TEXT_LENGHT+LINE_ENTRY_TEXT_OFFSET();
+			backup     = buffer[backup_pos];
+			buffer[backup_pos] = '\0';
+		}
+		//
+		lcd_lib_set(LCD_CHAR_MARGIN_LEFT-1, offsetY-1, LCD_GFX_WIDTH-LCD_CHAR_MARGIN_RIGHT, offsetY+7);
+		lcd_lib_clear_string(LCD_CHAR_MARGIN_LEFT+LINE_ENTRY_GFX_BEGIN(), offsetY, buffer);
+		//
+		if (backup != '\0')
+			buffer[backup_pos] = backup;
+	}
+	else
     {
-        //lcd_lib_set(3, drawOffset+8*n-1, 62, drawOffset+8*n+7);
-        lcd_lib_set(LCD_CHAR_MARGIN_LEFT-1, offsetY-1, LCD_GFX_WIDTH-LCD_CHAR_MARGIN_RIGHT, offsetY+7);
-        lcd_lib_clear_string(LCD_CHAR_MARGIN_LEFT, offsetY, buffer);
-    }else{
-        lcd_lib_draw_string(LCD_CHAR_MARGIN_LEFT, offsetY, buffer);
-    }
+		if ((ui_mode & UI_SCROLL_ENTRY) && (buffer_len > LINE_ENTRY_TEXT_LENGHT))
+		{
+			backup = buffer[LINE_ENTRY_TEXT_LENGHT];
+			buffer[LINE_ENTRY_TEXT_LENGHT] = '\0';
+		}
+		//
+		lcd_lib_draw_string(LCD_CHAR_MARGIN_LEFT, offsetY, buffer);
+		//
+		if (backup != '\0')
+			buffer[LINE_ENTRY_TEXT_LENGHT] = backup;
+	}
 }
 
 void lcd_scroll_menu(const char* menuNameP, int8_t entryCount, scrollDrawCallback_t entryDrawCallback, entryDetailsCallback_t entryDetailsCallback)
@@ -207,10 +259,10 @@ void lcd_scroll_menu(const char* menuNameP, int8_t entryCount, scrollDrawCallbac
     viewPos += viewDiff / 4;
 //    if (viewDiff > 0) { viewPos ++; led_glow = led_glow_dir = 0; }
 //    if (viewDiff < 0) { viewPos --; led_glow = led_glow_dir = 0; }
-    if (viewDiff > 0) { ++viewPos; }
-    else if (viewDiff < 0) { --viewPos; }
+    if      (viewDiff > 0) { ++viewPos; line_entry_pos_reset(); }
+    else if (viewDiff < 0) { --viewPos; line_entry_pos_reset(); }
 
-    uint8_t drawOffset = 10 - (uint16_t(viewPos) % 8);
+    uint8_t drawOffset = 11 - (uint16_t(viewPos) % 8);
     uint8_t itemOffset = uint16_t(viewPos) / 8;
     for(uint8_t n=0; n<6; n++)
     {
@@ -222,7 +274,7 @@ void lcd_scroll_menu(const char* menuNameP, int8_t entryCount, scrollDrawCallbac
 
     }
     lcd_lib_set(3, 0, 124, 8);
-    lcd_lib_clear(3, 47, 124, 63);
+    lcd_lib_clear(3, 49, 124, 63);
     lcd_lib_clear(3, 9, 124, 9);
 
     lcd_lib_draw_hline(3, 124, 50);
@@ -315,19 +367,18 @@ static void lcd_menu_material_reheat()
 
 bool check_heater_timeout()
 {
-    if (heater_timeout && !commands_queued())
+    if (heater_timeout && !commands_queued() && !HAS_SERIAL_CMD)
     {
-        const unsigned long m = millis();
-        const unsigned long period = heater_timeout*MILLISECONDS_PER_MINUTE;
-        if (!HAS_SERIAL_CMD && (m-last_user_interaction > period) && (m-lastSerialCommandTime > period))
+        const unsigned long timeout = last_user_interaction + (heater_timeout*MILLISECONDS_PER_MINUTE);
+        if (timeout < millis())
         {
-            if (target_temperature[active_extruder] > (EXTRUDE_MINTEMP - 40))
+            for(uint8_t e=0; e<EXTRUDERS; ++e)
             {
-                for(uint8_t n=0; n<EXTRUDERS; ++n)
+                if (target_temperature[e] > (EXTRUDE_MINTEMP - 40))
                 {
                     // switch off nozzle heater
-                    backup_temperature[n] = target_temperature[n];
-                    setTargetHotend(0, n);
+                    backup_temperature[e] = target_temperature[e];
+                    cooldownHotend(e);
                 }
             }
             return false;

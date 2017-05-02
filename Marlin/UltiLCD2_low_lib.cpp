@@ -51,7 +51,7 @@ uint8_t led_glow = 0;
 uint8_t led_glow_dir;
 
 /**
- * i2c communiation low level functions.
+ * i2c communication low level functions.
  */
 static inline void i2c_start()
 {
@@ -198,7 +198,7 @@ void lcd_lib_init()
 uint16_t lcd_update_pos = 0;
 ISR(TWI_vect)
 {
-    if (lcd_update_pos == LCD_GFX_WIDTH*LCD_GFX_HEIGHT/8)
+    if (lcd_update_pos == LCD_GFX_WIDTH*LCD_GFX_HEIGHT/8u)
     {
         i2c_end();
     }
@@ -221,7 +221,8 @@ void lcd_lib_update_screen()
 {
     if (lcd_timeout > 0)
     {
-        if ((millis() - last_user_interaction) > (lcd_timeout*MILLISECONDS_PER_MINUTE))
+        const unsigned long timeout=last_user_interaction + (lcd_timeout*MILLISECONDS_PER_MINUTE);
+        if (timeout < millis())
         {
             if (!(sleep_state & SLEEP_LCD_DIMMED))
             {
@@ -290,7 +291,7 @@ void lcd_lib_update_screen()
         // update screen content
         i2c_start();
         i2c_send_raw(I2C_LCD_ADDRESS << 1 | I2C_WRITE);
-        //Set the drawin position to 0,0
+        //Set the drawing position to 0,0
         i2c_send_raw(I2C_LCD_SEND_COMMAND);
         i2c_send_raw(0x00 | (0 & 0x0F));
         i2c_send_raw(0x10 | (0 >> 4));
@@ -508,12 +509,12 @@ void lcd_lib_clear_string(uint8_t x, uint8_t y, const char* str)
 
 void lcd_lib_draw_string_center(uint8_t y, const char* str)
 {
-    lcd_lib_draw_string(64 - strlen(str) * 3, y, str);
+    lcd_lib_draw_string(LCD_GFX_WIDTH/2 - min(strlen(str), LINE_ENTRY_TEXT_LENGHT) * (LCD_CHAR_SPACING/2), y, str);
 }
 
 void lcd_lib_clear_string_center(uint8_t y, const char* str)
 {
-    lcd_lib_clear_string(64 - strlen(str) * 3, y, str);
+    lcd_lib_clear_string(LCD_GFX_WIDTH/2 - min(strlen(str), LINE_ENTRY_TEXT_LENGHT) * (LCD_CHAR_SPACING/2), y, str);
 }
 
 void lcd_lib_draw_stringP(uint8_t x, uint8_t y, const char* pstr)
@@ -580,12 +581,12 @@ void lcd_lib_clear_stringP(uint8_t x, uint8_t y, const char* pstr)
 
 void lcd_lib_draw_string_centerP(uint8_t y, const char* pstr)
 {
-    lcd_lib_draw_stringP(64 - strlen_P(pstr) * 3, y, pstr);
+    lcd_lib_draw_stringP(LCD_GFX_WIDTH/2 - strlen_P(pstr) * (LCD_CHAR_SPACING/2), y, pstr);
 }
 
 void lcd_lib_clear_string_centerP(uint8_t y, const char* pstr)
 {
-    lcd_lib_clear_stringP(64 - strlen_P(pstr) * 3, y, pstr);
+    lcd_lib_clear_stringP(LCD_GFX_WIDTH/2 - strlen_P(pstr) * (LCD_CHAR_SPACING/2), y, pstr);
 }
 
 void lcd_lib_draw_string_center_atP(uint8_t x, uint8_t y, const char* pstr)

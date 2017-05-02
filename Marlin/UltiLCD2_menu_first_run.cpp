@@ -120,7 +120,7 @@ static void parkHeadForLeftAdjustment()
 {
     add_homeing[Z_AXIS] -= current_position[Z_AXIS];
     current_position[Z_AXIS] = 0;
-    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
+    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS], active_extruder, true);
 
     char buffer[32] = {0};
     sprintf_P(buffer, PSTR("G1 F%i Z5"), int(homing_feedrate[Z_AXIS]));
@@ -450,12 +450,12 @@ static void runMaterialForward()
     float old_max_feedrate_e = max_feedrate[E_AXIS];
     float old_retract_acceleration = retract_acceleration;
     float old_max_e_jerk = max_e_jerk;
-    max_feedrate[E_AXIS] = float(FILAMENT_FAST_STEPS) / axis_steps_per_unit[E_AXIS];
-    retract_acceleration = float(FILAMENT_LONG_ACCELERATION_STEPS) / axis_steps_per_unit[E_AXIS];
+    max_feedrate[E_AXIS] = float(FILAMENT_FAST_STEPS) / e_steps_per_unit(active_extruder);
+    retract_acceleration = float(FILAMENT_LONG_ACCELERATION_STEPS) / e_steps_per_unit(active_extruder);
     max_e_jerk = FILAMENT_LONG_MOVE_JERK;
 
     current_position[E_AXIS] = 0;
-    plan_set_e_position(current_position[E_AXIS]);
+    plan_set_e_position(current_position[E_AXIS], active_extruder, true);
     current_position[E_AXIS] = FILAMENT_FORWARD_LENGTH;
     plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS], max_feedrate[E_AXIS], 0);
 
@@ -501,7 +501,7 @@ static void lcd_menu_first_run_material_load_forward()
     }
 
     long pos = st_get_position(E_AXIS);
-    long targetPos = lround(FILAMENT_FORWARD_LENGTH*axis_steps_per_unit[E_AXIS]);
+    long targetPos = lround(FILAMENT_FORWARD_LENGTH*e_steps_per_unit(active_extruder));
     uint8_t progress = (pos * 125 / targetPos);
     lcd_progressbar(progress);
 
@@ -539,7 +539,7 @@ static void lcd_menu_first_run_print_1()
 
 static void lcd_menu_first_run_print_card_detect()
 {
-    if (!card.sdInserted)
+    if (!card.sdInserted())
     {
         lcd_info_screen(NULL, lcd_return_to_main_menu);
         DRAW_PROGRESS_NR(21);

@@ -133,14 +133,14 @@ void lcd_menu_change_material_preheat()
             quickStop();
             set_extrude_min_temp(0);
             current_position[E_AXIS] = 0.0f;
-            plan_set_e_position(current_position[E_AXIS]);
+            plan_set_e_position(current_position[E_AXIS], active_extruder, true);
 
             float old_max_feedrate_e = max_feedrate[E_AXIS];
             float old_retract_acceleration = retract_acceleration;
             float old_max_e_jerk = max_e_jerk;
 
-            max_feedrate[E_AXIS] = float(FILAMENT_FAST_STEPS) / axis_steps_per_unit[E_AXIS];
-            retract_acceleration = float(FILAMENT_LONG_ACCELERATION_STEPS) / axis_steps_per_unit[E_AXIS];
+            max_feedrate[E_AXIS] = float(FILAMENT_FAST_STEPS) / e_steps_per_unit(active_extruder);
+            retract_acceleration = float(FILAMENT_LONG_ACCELERATION_STEPS) / e_steps_per_unit(active_extruder);
             max_e_jerk = FILAMENT_LONG_MOVE_JERK;
 
             current_position[E_AXIS] -= 1.0 / volume_to_filament_length[active_extruder];
@@ -206,7 +206,7 @@ static void lcd_menu_change_material_remove()
     lcd_lib_draw_stringP(3, 20, PSTR("Reversing material"));
 
     long pos = -st_get_position(E_AXIS);
-    long targetPos = lround(FILAMENT_REVERSAL_LENGTH * axis_steps_per_unit[E_AXIS]);
+    long targetPos = lround(FILAMENT_REVERSAL_LENGTH * e_steps_per_unit(active_extruder));
     uint8_t progress = (pos * 125 / targetPos);
     lcd_progressbar(progress);
 
@@ -247,7 +247,7 @@ void lcd_menu_insert_material_preheat()
     int16_t temp = degHotend(active_extruder) - 20;
     int16_t target = degTargetHotend(active_extruder) - 20 - 10;
     if (temp < 0) temp = 0;
-    if (temp > target && temp < target + 20 && (card.pause || !commands_queued()))
+    if (temp > target && temp < target + 20 && (card.pause() || !commands_queued()))
     {
         set_extrude_min_temp(0);
         menu.replace_menu(menu_t(lcd_menu_change_material_insert_wait_user, MAIN_MENU_ITEM_POS(0)));
@@ -328,13 +328,13 @@ static void lcd_menu_change_material_insert_wait_user_ready()
     float old_retract_acceleration = retract_acceleration;
     float old_max_e_jerk = max_e_jerk;
 
-    max_feedrate[E_AXIS] = float(FILAMENT_FAST_STEPS) / axis_steps_per_unit[E_AXIS];
-    retract_acceleration = float(FILAMENT_LONG_ACCELERATION_STEPS) / axis_steps_per_unit[E_AXIS];
+    max_feedrate[E_AXIS] = float(FILAMENT_FAST_STEPS) / e_steps_per_unit(active_extruder);
+    retract_acceleration = float(FILAMENT_LONG_ACCELERATION_STEPS) / e_steps_per_unit(active_extruder);
     max_e_jerk = FILAMENT_LONG_MOVE_JERK;
 
     quickStop();
     current_position[E_AXIS] = 0.0f;
-    plan_set_e_position(current_position[E_AXIS]);
+    plan_set_e_position(current_position[E_AXIS], active_extruder, true);
 
     current_position[E_AXIS] += FILAMENT_FORWARD_LENGTH / volume_to_filament_length[active_extruder];
     plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS], max_feedrate[E_AXIS], active_extruder);
@@ -377,7 +377,7 @@ static void lcd_menu_change_material_insert_forward()
     lcd_lib_draw_stringP(3, 20, PSTR("Forwarding material"));
 
     long pos = st_get_position(E_AXIS);
-    long targetPos = lround(FILAMENT_FORWARD_LENGTH*axis_steps_per_unit[E_AXIS]);
+    long targetPos = lround(FILAMENT_FORWARD_LENGTH*e_steps_per_unit(active_extruder));
     uint8_t progress = (pos * 125 / targetPos);
     lcd_progressbar(progress);
 
@@ -397,7 +397,7 @@ static void materialInsertReady()
 
     // retract material
     current_position[E_AXIS] = 0.0f;
-    plan_set_e_position(current_position[E_AXIS]);
+    plan_set_e_position(current_position[E_AXIS], active_extruder, true);
     if (retracted)
     {
         current_position[E_AXIS] -= retract_recover_length;
@@ -408,7 +408,7 @@ static void materialInsertReady()
     }
     plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS], retract_feedrate/60, active_extruder);
 
-    if (!card.sdprinting)
+    if (!card.sdprinting())
     {
         // cool down nozzle
         for(uint8_t n=0; n<EXTRUDERS; n++)
@@ -512,7 +512,7 @@ static void lcd_menu_material_export_done()
 
 static void lcd_menu_material_export()
 {
-    if (!card.sdInserted)
+    if (!card.sdInserted())
     {
         LED_GLOW
         lcd_lib_encoder_pos = MAIN_MENU_ITEM_POS(0);
@@ -610,7 +610,7 @@ static void lcd_menu_material_import_done()
 
 static void lcd_menu_material_import()
 {
-    if (!card.sdInserted)
+    if (!card.sdInserted())
     {
         LED_GLOW
         lcd_lib_encoder_pos = MAIN_MENU_ITEM_POS(0);

@@ -52,7 +52,7 @@ static uint8_t printing_page = 0;
 static void lcd_menu_print_page_inc() { lcd_lib_keyclick(); lcd_basic_screen(); menu.set_selection(0); ++printing_page; }
 static void lcd_menu_print_page_dec() { lcd_lib_keyclick(); lcd_basic_screen(); menu.set_selection(1); --printing_page; }
 
-#if ENABLED(BABYSTEPPING)
+#if defined(BABYSTEPPING)
 static void init_babystepping();
 static void lcd_menu_babystepping();
 #endif // BABYSTEPPING
@@ -70,7 +70,7 @@ static void lcd_print_tune_accel();
 static void lcd_print_tune_xyjerk();
 static void lcd_position_z_axis();
 
-#define EXPERT_VERSION 6
+#define EXPERT_VERSION 7
 
 void tinkergnome_init()
 {
@@ -78,6 +78,16 @@ void tinkergnome_init()
 
     uint16_t version = GET_EXPERT_VERSION()+1;
 
+    if (version > 7)
+    {
+        axis_direction = GET_AXIS_DIRECTION();
+    }
+    else
+    {
+        // init direction flags
+        axis_direction = DEFAULT_AXIS_DIR;
+        SET_AXIS_DIRECTION(axis_direction);
+    }
     if (version > 6)
     {
 #if defined(PIDTEMPBED) && (TEMP_SENSOR_BED != 0)
@@ -107,7 +117,7 @@ void tinkergnome_init()
 #endif
         eeprom_write_block(pidBed, (uint8_t*)EEPROM_PID_BED, sizeof(pidBed));
 
-        SET_STEPS_E2(axis_steps_per_unit[3]);
+        SET_STEPS_E2(axis_steps_per_unit[E_AXIS]);
     }
     if (version > 5)
     {
@@ -128,18 +138,13 @@ void tinkergnome_init()
 
         SET_HEATER_CHECK_TEMP(heater_check_temp);
         SET_HEATER_CHECK_TIME(heater_check_time);
-#if EXTRUDERS > 1
-        pid2[0] = Kp;
-        pid2[1] = Ki;
-        pid2[2] = Kd;
-        eeprom_write_block(pid2, (uint8_t*)EEPROM_PID_2, sizeof(pid2));
-#else
+#if EXTRUDERS < 2
         float pid2[3];
+#endif // EXTRUDERS
         pid2[0] = Kp;
         pid2[1] = Ki;
         pid2[2] = Kd;
         eeprom_write_block(pid2, (uint8_t*)EEPROM_PID_2, sizeof(pid2));
-#endif // EXTRUDERS
 
 #if EXTRUDERS > 1 && defined(MOTOR_CURRENT_PWM_E_PIN) && MOTOR_CURRENT_PWM_E_PIN > -1
         motor_current_e2 = motor_current_setting[2];
@@ -180,12 +185,12 @@ void tinkergnome_init()
     }
     if (version > 1)
     {
-        expert_flags = GET_EXPERT_FLAGS();
+        control_flags = GET_CONTROL_FLAGS();
     }
     else
     {
-        expert_flags = FLAG_PID_NOZZLE;
-        SET_EXPERT_FLAGS(expert_flags);
+        control_flags = FLAG_PID_NOZZLE;
+        SET_CONTROL_FLAGS(control_flags);
     }
     if (version > 0)
     {
@@ -266,7 +271,7 @@ static void lcd_print_ask_pause()
     menu.add_menu(menu_t(lcd_select_first_submenu, lcd_menu_print_pause, NULL));
 }
 
-#if ENABLED(BABYSTEPPING)
+#if defined(BABYSTEPPING)
 static void lcd_start_babystepping()
 {
     menu.add_menu(menu_t(init_babystepping, lcd_menu_babystepping, NULL));
@@ -355,7 +360,7 @@ static const menu_t & get_print_menuoption(uint8_t nr, menu_t &opt)
         {
             opt.setData(MENU_NORMAL, lcd_menu_print_page_inc);
         }
-#if ENABLED(BABYSTEPPING)
+#if defined(BABYSTEPPING)
         else if (nr == menu_index++)
         {
             // babystepping menu
@@ -461,7 +466,7 @@ static void lcd_print_tune_xyjerk()
     lcd_tune_value(max_xy_jerk, 0, 100, 1.0);
 }
 
-#if ENABLED(BABYSTEPPING)
+#if defined(BABYSTEPPING)
 
 static void init_babystepping()
 {
@@ -1023,7 +1028,7 @@ static void drawPrintSubmenu (uint8_t nr, uint8_t &flags)
                 lcd_lib_draw_gfx(LCD_GFX_WIDTH - 2*LCD_CHAR_MARGIN_RIGHT - 2*LCD_CHAR_SPACING, BOTTOM_MENU_YPOS, nextGfx);
             }
         }
-#if ENABLED(BABYSTEPPING)
+#if defined(BABYSTEPPING)
         else if (nr == index++)
         {
             if (flags & MENU_SELECTED)
@@ -1250,9 +1255,11 @@ void lcd_menu_print_heatup_tg()
         }
 
 #if TEMP_SENSOR_BED != 0
-        if (current_temperature_bed >= target_temperature_bed - TEMP_WINDOW * 2 && !commands_queued())
-        {
+        if (current_temperature_bed >= target_temperature_bed - TEMP_WINDOW * 2 && !commands_queued() && !blocks_queued())
+#else
+        if (!commands_queued() && !blocks_queued())
 #endif // TEMP_SENSOR_BED
+        {
             bool ready = true;
             for(uint8_t e=0; (e<EXTRUDERS) && ready; ++e)
             {
@@ -1269,8 +1276,8 @@ void lcd_menu_print_heatup_tg()
                 printing_page = 0;
                 menu.replace_menu(menu_t(lcd_menu_printing_tg, MAIN_MENU_ITEM_POS(1)), false);
             }
-#if TEMP_SENSOR_BED != 0
         }
+#if TEMP_SENSOR_BED != 0
     }
 #endif
 
@@ -1337,7 +1344,7 @@ void lcd_menu_print_heatup_tg()
     }
     if (!(flags & MENU_STATUSLINE))
     {
-        lcd_lib_draw_string_left(5, card.longFilename);
+        lcd_lib_draw_string_left(5, card.currentLongFileName());
     }
 
     lcd_lib_update_screen();
@@ -1345,15 +1352,24 @@ void lcd_menu_print_heatup_tg()
 
 static unsigned long predictTimeLeft()
 {
-    if ((printing_state == PRINT_STATE_HEATING) || (printing_state == PRINT_STATE_HEATING_BED) || (!card.getFilePos()))
+    if ((printing_state == PRINT_STATE_HEATING) || (printing_state == PRINT_STATE_HEATING_BED) || (!card.getFilePos()) || (!card.getFileSize()))
     {
         return 0;
     }
 
-    unsigned long printTime = (millis() - starttime) / 1000L;
+    unsigned long printTime;
+    {
+        unsigned long m(millis());
+        if (starttime >= m)
+        {
+            return 0;
+        }
+        printTime = m/1000L - starttime/1000L;
+    }
+
     float progress = float(card.getFilePos()) / float(card.getFileSize());
 
-    if ((printTime < 60) || (progress < 0.001f))
+    if ((printTime < 60) || (progress < 0.01f))
     {
         return LCD_DETAIL_CACHE_TIME();
     }
@@ -1385,12 +1401,12 @@ static unsigned long predictTimeLeft()
         totalTime = predictedTime;
     }
 
-    return (printTime >= totalTime) ? 1 : totalTime - printTime;
+    return (printTime >= totalTime) ? 0 : totalTime - printTime;
 }
 
 void lcd_menu_printing_tg()
 {
-    if (card.pause)
+    if (card.pause())
     {
         menu.add_menu(menu_t(lcd_select_first_submenu, lcd_menu_print_resume, NULL, MAIN_MENU_ITEM_POS(0)), true);
         if (!checkFilamentSensor())
@@ -1413,7 +1429,7 @@ void lcd_menu_printing_tg()
     //                float mm_e = current_block->steps_e / axis_steps_per_unit[E_AXIS];
 
                 // calculate live extrusion rate from e speed and filament area
-                float speed_e = current_block->steps_e * current_block->nominal_rate / axis_steps_per_unit[E_AXIS] / current_block->step_event_count;
+                float speed_e = current_block->steps_e * current_block->nominal_rate / e_steps_per_unit(current_block->active_extruder) / current_block->step_event_count;
                 float volume = (volume_to_filament_length[current_block->active_extruder] < 0.99) ? speed_e / volume_to_filament_length[current_block->active_extruder] : speed_e*DEFAULT_FILAMENT_AREA;
 
                 e_smoothed_speed[current_block->active_extruder] = (e_smoothed_speed[current_block->active_extruder]*LOW_PASS_SMOOTHING) + ( volume *(1.0-LOW_PASS_SMOOTHING));
@@ -1427,7 +1443,15 @@ void lcd_menu_printing_tg()
         if (printing_page == 0)
         {
 #ifdef __AVR__
-            uint8_t progress = IS_SD_PRINTING ? card.getFilePos() / ((card.getFileSize() + 123) / 124) : 0;
+            uint8_t progress(0);
+            if IS_SD_PRINTING
+            {
+                uint32_t divisor = (card.getFileSize() + 123) / 124;
+                if (divisor)
+                {
+                    progress = card.getFilePos() / divisor;
+                }
+            }
 #else
             uint8_t progress = 0;
 #endif
@@ -1438,7 +1462,7 @@ void lcd_menu_printing_tg()
             {
             default:
 
-                if (card.pause)
+                if (card.pause())
                 {
                     lcd_lib_draw_gfx(54, 15, hourglassGfx);
                     lcd_lib_draw_stringP(64, 15, (movesplanned() < 1) ? PSTR("Paused...") : PSTR("Pausing..."));
@@ -1455,11 +1479,11 @@ void lcd_menu_printing_tg()
                             int_to_time_min(timeLeftSec, buffer);
                             lcd_lib_draw_string(64, 15, buffer);
                         }
+                        // draw progress string right aligned
+                        int_to_string(progress*100/124, buffer, PSTR("%"));
+                        lcd_lib_draw_string_right(15, buffer);
+                        lcd_progressline(progress);
                     }
-                    // draw progress string right aligned
-                    int_to_string(progress*100/124, buffer, PSTR("%"));
-                    lcd_lib_draw_string_right(15, buffer);
-                    lcd_progressline(progress);
                 }
 
                 break;
@@ -1467,7 +1491,7 @@ void lcd_menu_printing_tg()
                 lcd_lib_encoder_pos = ENCODER_NO_SELECTION;
                 menu.reset_submenu();
                 // lcd_lib_draw_string_left(5, PSTR("Paused..."));
-                lcd_lib_draw_string_left(5, card.longFilename);
+                lcd_lib_draw_string_left(5, card.currentLongFileName());
                 lcd_lib_draw_gfx(54, 15, hourglassGfx);
                 if (!blocks_queued())
                 {
@@ -1478,14 +1502,14 @@ void lcd_menu_printing_tg()
                 {
                     lcd_lib_draw_stringP(64, 15, PSTR("Pausing..."));
                 }
-                if (!led_glow)
-                {
-                    lcd_lib_tick();
-                }
+//                if (!led_glow)
+//                {
+//                    lcd_lib_tick();
+//                }
                 break;
             }
 
-#if DISABLED(BABYSTEPPING)
+#ifndef BABYSTEPPING
             // z position
             lcd_lib_draw_string_leftP(15, PSTR("Z"));
 
@@ -1496,7 +1520,7 @@ void lcd_menu_printing_tg()
         }
 
         uint8_t index = 0;
-#if ENABLED(BABYSTEPPING)
+#ifdef BABYSTEPPING
         uint8_t len = (printing_page == 1) ? 6 + min(EXTRUDERS, 2) : EXTRUDERS*2 + BED_MENU_OFFSET + 6;
 #else
         uint8_t len = (printing_page == 1) ? 6 + min(EXTRUDERS, 2) : EXTRUDERS*2 + BED_MENU_OFFSET + 5;
@@ -1539,7 +1563,7 @@ void lcd_menu_printing_tg()
             }
             else if (card.isFileOpen())
             {
-                lcd_lib_draw_string_left(5, card.longFilename);
+                lcd_lib_draw_string_left(5, card.currentLongFileName());
             }
         }
         lcd_lib_update_screen();
@@ -1599,7 +1623,7 @@ void lcd_simple_buildplate_store()
 {
     add_homeing[Z_AXIS] -= current_position[Z_AXIS];
     current_position[Z_AXIS] = 0;
-    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
+    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS], active_extruder, true);
     Config_StoreSettings();
     menu.return_to_previous();
 }
@@ -1794,8 +1818,8 @@ static void recover_abort()
     quickStop();
     clear_command_queue();
 
-    for(uint8_t n=0; n<EXTRUDERS; n++)
-        setTargetHotend(0, n);
+    for(uint8_t n=0; n<EXTRUDERS; ++n)
+        cooldownHotend(n);
     fanSpeed = 0;
     reset_printing_state();
     doCooldown();
@@ -1841,7 +1865,7 @@ static void lcd_menu_recover_file()
     }
     if (!(flags & MENU_STATUSLINE))
     {
-        lcd_lib_draw_string_left(5, card.longFilename);
+        lcd_lib_draw_string_left(5, card.currentLongFileName());
     }
 
     lcd_lib_update_screen();
@@ -1856,7 +1880,7 @@ static void lcd_recover_start()
     active_extruder = 0;
     #endif // EXTRUDERS
     current_position[E_AXIS] = 0.0f;
-    plan_set_e_position(current_position[E_AXIS]);
+    plan_set_e_position(current_position[E_AXIS], active_extruder, true);
     menu.replace_menu(menu_t(lcd_menu_recover_file));
     card.startFileprint();
 }
@@ -1869,8 +1893,7 @@ static void lcd_recover_zvalue()
 void reset_printing_state()
 {
     printing_state = PRINT_STATE_NORMAL;
-    card.sdprinting = false;
-//    card.reset();
+    card.stopPrinting();
 }
 
 static const menu_t & get_recover_menuoption(uint8_t nr, menu_t &opt)
@@ -2089,7 +2112,7 @@ static void stopMove()
     {
         TARGET_POS(i) = current_position[i] = constrain(st_get_position(i)/axis_steps_per_unit[i], min_pos[i], max_pos[i]);
     }
-    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
+    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS], active_extruder, true);
 }
 
 static void lcd_move_axis(AxisEnum axis, float diff)
@@ -2200,6 +2223,11 @@ static void drawMoveDetails()
     {
         lcd_lib_draw_gfx(LCD_GFX_WIDTH-LCD_CHAR_MARGIN_RIGHT-6, 5, speedGfx);
     }
+}
+
+static void pos2string(uint8_t flags, uint8_t axis, char *buffer)
+{
+    float_to_string2((flags & MENU_ACTIVE) ? TARGET_POS(axis) : st_get_position(axis) / axis_steps_per_unit[axis], buffer, PSTR("mm"));
 }
 
 // create menu options for "move axes"
@@ -2342,7 +2370,7 @@ static void drawMoveSubmenu(uint8_t nr, uint8_t &flags)
             lcd_lib_draw_string_leftP(5, PSTR("X axis position"));
             flags |= MENU_STATUSLINE;
         }
-        float_to_string2(st_get_position(X_AXIS) / axis_steps_per_unit[X_AXIS], buffer, PSTR("mm"));
+        pos2string(flags, X_AXIS, buffer);
         LCDMenu::drawMenuString(LCD_CHAR_MARGIN_LEFT+5*LCD_CHAR_SPACING
                               , 17
                               , 48
@@ -2402,7 +2430,7 @@ static void drawMoveSubmenu(uint8_t nr, uint8_t &flags)
             lcd_lib_draw_string_leftP(5, PSTR("Y axis position"));
             flags |= MENU_STATUSLINE;
         }
-        float_to_string2(st_get_position(Y_AXIS) / axis_steps_per_unit[Y_AXIS], buffer, PSTR("mm"));
+        pos2string(flags, Y_AXIS, buffer);
         LCDMenu::drawMenuString(LCD_CHAR_MARGIN_LEFT+5*LCD_CHAR_SPACING
                               , 29
                               , 48
@@ -2462,7 +2490,7 @@ static void drawMoveSubmenu(uint8_t nr, uint8_t &flags)
             lcd_lib_draw_string_leftP(5, PSTR("Z axis position"));
             flags |= MENU_STATUSLINE;
         }
-        float_to_string2(st_get_position(Z_AXIS) / axis_steps_per_unit[Z_AXIS], buffer, PSTR("mm"));
+        pos2string(flags, Z_AXIS, buffer);
         LCDMenu::drawMenuString(LCD_CHAR_MARGIN_LEFT+5*LCD_CHAR_SPACING
                               , 41
                               , 48
@@ -2518,7 +2546,8 @@ void manage_led_timeout()
 {
     if ((led_timeout > 0) && !(sleep_state & SLEEP_LED_OFF))
     {
-        if (((millis() - last_user_interaction) > (led_timeout*MILLISECONDS_PER_MINUTE)))
+        const unsigned long timeout=last_user_interaction + (led_timeout*MILLISECONDS_PER_MINUTE);
+        if (timeout < millis())
         {
             if (!(sleep_state & SLEEP_LED_DIMMED))
             {
@@ -2723,7 +2752,7 @@ static void lcd_extrude_return()
 {
     set_extrude_min_temp(EXTRUDE_MINTEMP);
     menu.return_to_previous();
-    if (!card.sdprinting)
+    if (!card.sdprinting())
     {
         target_temperature[active_extruder] = 0;
     }
@@ -2738,15 +2767,15 @@ static void lcd_extrude_reset_pos()
 {
     lcd_lib_keyclick();
     current_position[E_AXIS] = 0.0f;
-    plan_set_e_position(current_position[E_AXIS]);
+    plan_set_e_position(current_position[E_AXIS], active_extruder, true);
     TARGET_POS(E_AXIS) = current_position[E_AXIS];
 }
 
 static void lcd_extrude_init_move()
 {
     st_synchronize();
-    plan_set_e_position(st_get_position(E_AXIS) / axis_steps_per_unit[E_AXIS] / volume_to_filament_length[active_extruder]);
-    TARGET_POS(E_AXIS) = st_get_position(E_AXIS) / axis_steps_per_unit[E_AXIS];
+    plan_set_e_position(st_get_position(E_AXIS) / e_steps_per_unit(active_extruder) / volume_to_filament_length[active_extruder], active_extruder, true);
+    TARGET_POS(E_AXIS) = st_get_position(E_AXIS) / e_steps_per_unit(active_extruder);
 }
 
 static void lcd_extrude_move()
@@ -2770,8 +2799,8 @@ static void lcd_extrude_quit_move()
 static void lcd_extrude_init_pull()
 {
     st_synchronize();
-    plan_set_e_position(st_get_position(E_AXIS) / axis_steps_per_unit[E_AXIS] / volume_to_filament_length[active_extruder]);
-    TARGET_POS(E_AXIS) = st_get_position(E_AXIS) / axis_steps_per_unit[E_AXIS];
+    plan_set_e_position(st_get_position(E_AXIS) / e_steps_per_unit(active_extruder) / volume_to_filament_length[active_extruder], active_extruder, true);
+    TARGET_POS(E_AXIS) = st_get_position(E_AXIS) / e_steps_per_unit(active_extruder);
     //Set E motor power lower so the motor will skip instead of grind.
 #if EXTRUDERS > 1 && defined(MOTOR_CURRENT_PWM_E_PIN) && MOTOR_CURRENT_PWM_E_PIN > -1
     digipot_current(2, active_extruder ? (motor_current_e2*2/3) : (motor_current_setting[2]*2/3));
@@ -2782,8 +2811,8 @@ static void lcd_extrude_init_pull()
     OLD_FEEDRATE = max_feedrate[E_AXIS];
     OLD_ACCEL = retract_acceleration;
     OLD_JERK = max_e_jerk;
-    max_feedrate[E_AXIS] = float(FILAMENT_FAST_STEPS) / axis_steps_per_unit[E_AXIS];
-    retract_acceleration = float(FILAMENT_LONG_ACCELERATION_STEPS) / axis_steps_per_unit[E_AXIS];
+    max_feedrate[E_AXIS] = float(FILAMENT_FAST_STEPS) / e_steps_per_unit(active_extruder);
+    retract_acceleration = float(FILAMENT_LONG_ACCELERATION_STEPS) / e_steps_per_unit(active_extruder);
     max_e_jerk = FILAMENT_LONG_MOVE_JERK;
 }
 
@@ -2826,7 +2855,7 @@ static void lcd_extrude_tune()
 static const menu_t & get_extrude_menuoption(uint8_t nr, menu_t &opt)
 {
     uint8_t menu_index = 0;
-    if (card.sdprinting) ++nr;
+    if (card.sdprinting()) ++nr;
 
     if (nr == menu_index++)
     {
@@ -2859,7 +2888,7 @@ static void drawExtrudeSubmenu (uint8_t nr, uint8_t &flags)
 {
     uint8_t index(0);
     char buffer[32] = {0};
-    if (card.sdprinting) ++nr;
+    if (card.sdprinting()) ++nr;
 
     if (nr == index++)
     {
@@ -2931,7 +2960,7 @@ static void drawExtrudeSubmenu (uint8_t nr, uint8_t &flags)
     }
     else if (nr == index++)
     {
-        // move material
+        // reverse material
         if (flags & (MENU_SELECTED | MENU_ACTIVE))
         {
             lcd_lib_draw_string_leftP(5, PSTR("Click & hold to pull"));
@@ -2955,7 +2984,7 @@ static void drawExtrudeSubmenu (uint8_t nr, uint8_t &flags)
     }
     else if (nr == index++)
     {
-        // move material
+        // zero e position
         if (flags & (MENU_SELECTED | MENU_ACTIVE))
         {
             lcd_lib_draw_string_leftP(5, PSTR("Reset position"));
@@ -2985,8 +3014,7 @@ static void drawExtrudeSubmenu (uint8_t nr, uint8_t &flags)
             lcd_lib_draw_string_leftP(5, PSTR("Rotate to extrude"));
             flags |= MENU_STATUSLINE;
         }
-        // lcd_lib_draw_gfx(LCD_GFX_WIDTH-LCD_CHAR_MARGIN_RIGHT-13*LCD_CHAR_SPACING-1, 35, flowGfx);
-        float_to_string2(st_get_position(E_AXIS) / axis_steps_per_unit[E_AXIS], buffer, PSTR("mm"));
+        float_to_string2(flags & MENU_ACTIVE ? TARGET_POS(E_AXIS) : st_get_position(E_AXIS) / e_steps_per_unit(active_extruder), buffer, PSTR("mm"));
         LCDMenu::drawMenuString(LCD_GFX_WIDTH-LCD_CHAR_MARGIN_RIGHT-11*LCD_CHAR_SPACING
                           , 35
                           , 11*LCD_CHAR_SPACING
@@ -3008,7 +3036,7 @@ void lcd_menu_expert_extrude()
     lcd_basic_screen();
     lcd_lib_draw_hline(3, 124, 13);
 
-    uint8_t len = card.sdprinting ? 5 : 6;
+    uint8_t len = card.sdprinting() ? 5 : 6;
 
     menu.process_submenu(get_extrude_menuoption, len);
 
@@ -3034,7 +3062,7 @@ void lcd_menu_expert_extrude()
 void recover_start_print(const char *cmd)
 {
     // recover print from current position
-    card.sdprinting = false;
+    card.stopPrinting();
     quickStop();
     clear_command_queue();
     // keep last command in mind

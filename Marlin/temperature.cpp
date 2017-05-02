@@ -37,17 +37,16 @@
 #include "watchdog.h"
 #include "preferences.h"
 #include "tinkergnome.h"
-
-#define MAX_HEATERS  2     // activate max. 2 heaters at the same time
+#include "powerbudget.h"
 
 //===========================================================================
 //=============================public variables============================
 //===========================================================================
-int target_temperature[EXTRUDERS] = { 0 };
+uint16_t target_temperature[EXTRUDERS] = { 0 };
 int current_temperature_raw[EXTRUDERS] = { 0 };
 float current_temperature[EXTRUDERS] = { 0.0 };
 #if TEMP_SENSOR_BED != 0
-int target_temperature_bed = 0;
+uint16_t target_temperature_bed = 0;
 int current_temperature_bed_raw = 0;
 float current_temperature_bed = 0.0;
 #endif // TEMP_SENSOR_BED
@@ -74,7 +73,7 @@ float current_temperature_bed = 0.0;
   unsigned char fanSpeedSoftPwm;
 #endif
 
-#if ENABLED(BABYSTEPPING)
+#if defined(BABYSTEPPING)
   volatile int babystepsTodo[3]={0,0,0};
 #endif
 
@@ -446,11 +445,33 @@ void checkExtruderAutoFans()
 
 #endif // any extruder auto fan pins set
 
+static unsigned char limit_power(uint16_t wattage, unsigned char pwm, uint16_t &budget)
+{
+    if (pwm)
+    {
+        if (budget && wattage)
+        {
+            uint16_t power = (float(pwm) / 0x7f) * wattage;
+            if (power > budget)
+            {
+                pwm = (float(budget) / wattage) * 0x7f;
+                budget = 0;
+            }
+            else
+            {
+                budget -= power;
+            }
+        }
+        else
+        {
+            pwm = 0;
+        }
+    }
+    return pwm;
+}
+
 void manage_heater()
 {
-  float pid_input;
-  float pid_output;
-
   if(temp_meas_ready != true)   //better readability
     return;
 
@@ -466,9 +487,28 @@ void manage_heater()
 	  min_temp_error(0);
   }
   #endif
+
+  uint16_t budget = power_budget;
+  {
+      // reduce power budget on axis activity
+      if (block_buffer_head != block_buffer_tail)
+      {
+          block_t *block = &block_buffer[block_buffer_tail];
+          uint16_t budget_part = constrain(8, 0, power_budget >> 4);
+          uint8_t  counter = 0x01;
+          if(block->steps_x != 0) counter <<= 0x01;
+          if(block->steps_y != 0) counter <<= 0x01;
+          if(block->steps_z != 0) counter <<= 0x01;
+          if(block->steps_e != 0) counter <<= 0x01;
+          while (counter >>= 1) budget -= budget_part;
+      }
+  }
+
+  float pid_input;
+  float pid_output;
   int target_temp;
 
-  for(int e = 0; e < EXTRUDERS; e++)
+  for(uint8_t e = 0; e < EXTRUDERS; ++e)
   {
     target_temp = (printing_state == PRINT_STATE_RECOVER) ? recover_temperature[e] : target_temperature[e];
   #ifdef PIDTEMP
@@ -490,14 +530,14 @@ void manage_heater()
             pid_reset[e] = false;
           }
           #if EXTRUDERS > 1
-            pTerm[e] = (active_extruder ? pid2[0] : Kp) * pid_error[e];
+            pTerm[e] = (e ? pid2[0] : Kp) * pid_error[e];
           #else
             pTerm[e] = Kp * pid_error[e];
           #endif
           temp_iState[e] += pid_error[e];
           temp_iState[e] = constrain(temp_iState[e], temp_iState_min[e], temp_iState_max[e]);
           #if EXTRUDERS > 1
-            iTerm[e] = (active_extruder ? pid2[1] : Ki) * temp_iState[e];
+            iTerm[e] = (e ? pid2[1] : Ki) * temp_iState[e];
           #else
             iTerm[e] = Ki * temp_iState[e];
           #endif
@@ -505,7 +545,7 @@ void manage_heater()
           //K1 defined in Configuration.h in the PID settings
           #define K2 (1.0-K1)
           #if EXTRUDERS > 1
-            dTerm[e] = ((active_extruder ? pid2[2] : Kd) * (pid_input - temp_dState[e]))*K2 + (K1 * dTerm[e]);
+            dTerm[e] = ((e ? pid2[2] : Kd) * (pid_input - temp_dState[e]))*K2 + (K1 * dTerm[e]);
           #else
             dTerm[e] = (Kd * (pid_input - temp_dState[e]))*K2 + (K1 * dTerm[e]);
           #endif
@@ -540,7 +580,7 @@ void manage_heater()
     // Check if temperature is within the correct range
     if((current_temperature[e] > minttemp[e]) && (current_temperature[e] < maxttemp[e]))
     {
-      soft_pwm[e] = (int)pid_output >> 1;
+      soft_pwm[e] = limit_power(power_extruder[e], (int)pid_output >> 1, budget);
     }
     else {
       soft_pwm[e] = 0;
@@ -551,7 +591,7 @@ void manage_heater()
     {
         if(degHotend(e) < watch_start_temp[e] + WATCH_TEMP_INCREASE)
         {
-            setTargetHotend(0, e);
+            cooldownHotend(e);
             LCD_MESSAGEPGM("Heating failed");
             SERIAL_ECHO_START;
             SERIAL_ECHOLNPGM("Heating failed");
@@ -584,7 +624,7 @@ void manage_heater()
             max_heating_start_millis[e] = millis();
             max_heating_start_temperature[e] = current_temperature[e];
         }
-        if (millis() > max_heating_start_millis[e] + heater_check_time*1000)
+        if (millis() > max_heating_start_millis[e] + heater_check_time*1000UL)
         {
             //Did not heat up MAX_HEATING_TEMPERATURE_INCREASE in MAX_HEATING_CHECK_MILLIS while the PID was at the maximum.
             //Potential problems could be that the heater is not working, or the temperature sensor is not measuring what the heater is heating.
@@ -626,14 +666,12 @@ void manage_heater()
 
   #if TEMP_SENSOR_BED != 0
 
-//  #ifndef PIDTEMPBED
   if (!pidTempBed())
   {
     if(millis() - previous_millis_bed_heater < BED_CHECK_INTERVAL)
       return;
     previous_millis_bed_heater = millis();
   }
-//  #endif
 
   #ifdef PIDTEMPBED
   if (pidTempBed())
@@ -660,7 +698,7 @@ void manage_heater()
 
 	  if((current_temperature_bed > BED_MINTEMP) && (current_temperature_bed < BED_MAXTEMP))
 	  {
-	    soft_pwm_bed = (int)pid_output >> 1;
+	    soft_pwm_bed = limit_power(power_buildplate, (int)pid_output >> 1, budget);
 	  }
 	  else {
 	    soft_pwm_bed = 0;
@@ -679,7 +717,7 @@ void manage_heater()
         }
         else
         {
-          soft_pwm_bed = MAX_BED_POWER>>1;
+          soft_pwm_bed = limit_power(power_buildplate, MAX_BED_POWER>>1, budget);
         }
       }
       else
@@ -697,7 +735,7 @@ void manage_heater()
         }
         else if(current_temperature_bed <= target_temperature_bed - BED_HYSTERESIS)
         {
-          soft_pwm_bed = MAX_BED_POWER>>1;
+          soft_pwm_bed = limit_power(power_buildplate, MAX_BED_POWER>>1, budget);
         }
       }
       else
@@ -1021,8 +1059,8 @@ void setWatch()
 
 void disable_heater()
 {
-  for(int i=0;i<EXTRUDERS;i++)
-    setTargetHotend(0,i);
+  for(int i=0;i<EXTRUDERS;++i)
+    cooldownHotend(i);
   #if TEMP_SENSOR_BED != 0
     setTargetBed(0);
   #endif
@@ -1160,7 +1198,6 @@ static int read_max6675()
 }
 #endif
 
-
 // Timer 0 is shared with millies
 ISR(TIMER0_COMPB_vect)
 {
@@ -1194,27 +1231,27 @@ ISR(TIMER0_COMPB_vect)
     soft_pwm_0 = soft_pwm[0];
     if (soft_pwm_0 > 0)
     {
-      WRITE(HEATER_0_PIN,1);
+      WRITE(HEATER_0_PIN, 1);
     }
     #if EXTRUDERS > 1
     soft_pwm_1 = soft_pwm[1];
     if (soft_pwm_1 > 0)
     {
-      WRITE(HEATER_1_PIN,1);
+      WRITE(HEATER_1_PIN, 1);
     }
     #endif
     #if EXTRUDERS > 2
     soft_pwm_2 = soft_pwm[2];
     if (soft_pwm_2 > 0)
     {
-      WRITE(HEATER_2_PIN,1);
+      WRITE(HEATER_2_PIN, 1);
     }
     #endif
     #if defined(HEATER_BED_PIN) && HEATER_BED_PIN > -1
     soft_pwm_b = soft_pwm_bed;
     #endif
     #ifdef FAN_SOFT_PWM
-    soft_pwm_fan = fanSpeedSoftPwm / 2;
+    soft_pwm_fan = fanSpeedSoftPwm >> 1;
     if(soft_pwm_fan > 0) WRITE(FAN_PIN,1);
     #endif
   }
@@ -1226,28 +1263,18 @@ ISR(TIMER0_COMPB_vect)
   if(soft_pwm_2 <= pwm_count) WRITE(HEATER_2_PIN,0);
   #endif
   #if defined(HEATER_BED_PIN) && HEATER_BED_PIN > -1
-  if(soft_pwm_b <= pwm_count)
+  // bed is reverse of other heaters - nozzle heaters typically turn on at pwm_count=0 and typically
+  // turns off before pwm_count gets to 127.  But the bed typically does not turn on until pwm_count
+  // is part way through the cycle and turns off when pwm_count gets back to 0.  This minimizes overlap
+  // when bed and nozzles are both on to reduce the load variation on the power supply (probably not necessary
+  // but possibly it lengthens the life of the capacitor inside the power brick).
+  if (pwm_count > (0x7f-soft_pwm_b) ) // reverse timing
   {
-    WRITE(HEATER_BED_PIN,0);
+    WRITE(HEATER_BED_PIN, 1);
   }
   else
   {
-    uint8_t heat_count = 0;
-    if (READ(HEATER_0_PIN))  ++heat_count;
-    #if EXTRUDERS > 1
-    if (READ(HEATER_1_PIN))  ++heat_count;
-    #endif
-    #if EXTRUDERS > 2
-    if (READ(HEATER_2_PIN))  ++heat_count;
-    #endif
-    if (heat_count < MAX_HEATERS)
-    {
-        WRITE(HEATER_BED_PIN, 1);
-    }
-    else
-    {
-        WRITE(HEATER_BED_PIN, 0);
-    }
+    WRITE(HEATER_BED_PIN, 0);
   }
   #endif
   #ifdef FAN_SOFT_PWM
@@ -1434,7 +1461,7 @@ ISR(TIMER0_COMPB_vect)
     }
 #endif
   }
-#if ENABLED(BABYSTEPPING)
+#if defined(BABYSTEPPING)
   for(uint8_t axis=0; axis<3; ++axis)
   {
     int curTodo=babystepsTodo[axis]; //get rid of volatile for performance
@@ -1530,6 +1557,27 @@ int get_maxtemp(uint8_t e)
 {
     return maxttemp[e];
 }
+
+void setTargetHotend(const uint16_t &celsius, uint8_t extruder) {
+  target_temperature[extruder] = celsius;
+  if (target_temperature[extruder] >= HEATER_0_MAXTEMP - 15)
+    target_temperature[extruder] = HEATER_0_MAXTEMP - 15;
+}
+
+void cooldownHotend(uint8_t extruder)
+{
+    target_temperature[extruder] = 0;
+}
+
+#if (TEMP_SENSOR_BED != 0) && defined(BED_MAXTEMP)
+void setTargetBed(const uint16_t &celsius)
+{
+  target_temperature_bed = celsius;
+  if (target_temperature_bed > BED_MAXTEMP - 15)
+    target_temperature_bed = BED_MAXTEMP - 15;
+}
+#endif
+
 
 #endif //PIDTEMP
 

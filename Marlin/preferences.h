@@ -1,6 +1,9 @@
 #ifndef PREFERENCES_H
 #define PREFERENCES_H
 
+#include "Marlin.h"
+#include "fastio.h"
+
 #define EEPROM_UI_MODE_OFFSET 0x401
 #define EEPROM_LED_TIMEOUT_OFFSET 0x402
 #define EEPROM_LCD_TIMEOUT_OFFSET 0x404
@@ -19,7 +22,8 @@
 #define EEPROM_MOTOR_CURRENT_E2 0x438  // 2 Byte
 #define EEPROM_PID_BED 0x43A  // 12 Byte
 #define EEPROM_STEPS_E2 0x446  // 4 Byte
-#define EEPROM_RESERVED 0x44A  // next position
+#define EEPROM_AXIS_DIRECTION 0x44A  // 1 Byte
+#define EEPROM_RESERVED 0x44B  // next position
 
 #define GET_UI_MODE() (eeprom_read_byte((const uint8_t*)EEPROM_UI_MODE_OFFSET))
 #define SET_UI_MODE(n) do { eeprom_write_byte((uint8_t*)EEPROM_UI_MODE_OFFSET, n); } while(0)
@@ -37,8 +41,8 @@
 #define SET_SLEEP_CONTRAST(n) do { eeprom_write_byte((uint8_t*)EEPROM_SLEEP_CONTRAST_OFFSET, n); } while(0)
 #define GET_SLEEP_GLOW() (eeprom_read_byte((const uint8_t*)EEPROM_SLEEP_GLOW_OFFSET))
 #define SET_SLEEP_GLOW(n) do { eeprom_write_byte((uint8_t*)EEPROM_SLEEP_GLOW_OFFSET, n); } while(0)
-#define GET_EXPERT_FLAGS() (eeprom_read_byte((const uint8_t*)EEPROM_PID_FLAGS))
-#define SET_EXPERT_FLAGS(n) do { eeprom_write_byte((uint8_t*)EEPROM_PID_FLAGS, n); } while(0)
+#define GET_CONTROL_FLAGS() (eeprom_read_byte((const uint8_t*)EEPROM_PID_FLAGS))
+#define SET_CONTROL_FLAGS(n) do { eeprom_write_byte((uint8_t*)EEPROM_PID_FLAGS, n); } while(0)
 #define GET_HEATER_TIMEOUT() (eeprom_read_byte((const uint8_t*)EEPROM_HEATER_TIMEOUT))
 #define SET_HEATER_TIMEOUT(n) do { eeprom_write_byte((uint8_t*)EEPROM_HEATER_TIMEOUT, n); } while(0)
 #define GET_END_RETRACT() (eeprom_read_float((const float*)EEPROM_END_RETRACT))
@@ -51,33 +55,37 @@
 #define SET_MOTOR_CURRENT_E2(n) do { eeprom_write_word((uint16_t*)EEPROM_MOTOR_CURRENT_E2, n); } while(0)
 #define GET_STEPS_E2() (eeprom_read_float((const float*)EEPROM_STEPS_E2))
 #define SET_STEPS_E2(n) do { eeprom_write_float((float*)EEPROM_STEPS_E2, n); } while(0)
+#define GET_AXIS_DIRECTION() (eeprom_read_byte((const uint8_t*)EEPROM_AXIS_DIRECTION))
+#define SET_AXIS_DIRECTION(n) do { eeprom_write_byte((uint8_t*)EEPROM_AXIS_DIRECTION, n); } while(0)
 
 // UI Mode
-#define UI_MODE_STANDARD  0
-#define UI_MODE_EXPERT    1
+// UI Mode
+#define UI_MODE_EXPERT    0x01
+#define UI_SCROLL_ENTRY   0x02
 
-#define UI_BEEP_SHORT    32
-#define UI_BEEP_OFF      64
+#define UI_BEEP_SHORT     0x20
+#define UI_BEEP_OFF       0x40
 
-// SLEEP/LCD STATE
-#define SLEEP_LED_DIMMED     1
-#define SLEEP_LED_OFF        2
-#define SLEEP_LCD_DIMMED     4
-#define SLEEP_COOLING        8
-#define SLEEP_SERIAL_CMD    16
-#define SLEEP_SERIAL_SCREEN 32
 
-#define SLEEP_UPDATE_LED   128
+// SLEEP/LCD/SERIAL STATE
+#define SLEEP_LED_DIMMED     0x01
+#define SLEEP_LED_OFF        0x02
+#define SLEEP_LCD_DIMMED     0x04
+#define SLEEP_COOLING        0x08
+#define SLEEP_SERIAL_CMD     0x10
+#define SLEEP_SERIAL_SCREEN  0x20
+#define SLEEP_RESERVED       0x40
+#define SLEEP_UPDATE_LED     0x80
 
 // control flags
-#define FLAG_PID_NOZZLE      1
-#define FLAG_PID_BED         2
-#define FLAG_SWAP_EXTRUDERS  4
-#define FLAG_RESERVED_3      8
-#define FLAG_RESERVED_4     16
-#define FLAG_RESERVED_5     32
-#define FLAG_RESERVED_6     64
-#define FLAG_RESERVED_7    128
+#define FLAG_PID_NOZZLE      0x01
+#define FLAG_PID_BED         0x02
+#define FLAG_SWAP_EXTRUDERS  0x04
+#define FLAG_MANUAL_FAN2     0x08
+#define FLAG_RESERVED_4      0x10
+#define FLAG_RESERVED_5      0x20
+#define FLAG_RESERVED_6      0x40
+#define FLAG_RESERVED_7      0x80
 
 #define LED_DIM_TIME 0		    // 0 min -> off
 #define LED_DIM_MAXTIME 240		// 240 min
@@ -87,13 +95,14 @@ extern uint16_t lcd_timeout;
 extern uint8_t lcd_contrast;
 extern uint8_t led_sleep_glow;
 extern uint8_t lcd_sleep_contrast;
-extern uint8_t expert_flags;
+extern uint8_t control_flags;
 extern float end_of_print_retraction;
 extern uint16_t led_timeout;
 extern uint8_t led_sleep_brightness;
 extern uint8_t heater_check_temp;
 extern uint8_t heater_check_time;
 extern uint8_t sleep_state;
+extern uint8_t axis_direction;
 
 #if EXTRUDERS > 1
 extern float pid2[3];
@@ -101,14 +110,11 @@ extern float pid2[3];
 #if EXTRUDERS > 1 && defined(MOTOR_CURRENT_PWM_E_PIN) && MOTOR_CURRENT_PWM_E_PIN > -1
 extern uint16_t motor_current_e2;
 #endif
-#if EXTRUDERS > 1
-extern float e2_steps_per_unit;
-#endif
 
-FORCE_INLINE bool pidTempBed() { return (expert_flags & FLAG_PID_BED); }
+FORCE_INLINE bool pidTempBed() { return (control_flags & FLAG_PID_BED); }
 
 #if EXTRUDERS > 1
-FORCE_INLINE bool swapExtruders() { return (expert_flags & FLAG_SWAP_EXTRUDERS); }
+FORCE_INLINE bool swapExtruders() { return (control_flags & FLAG_SWAP_EXTRUDERS); }
 #endif
 
 #define WORD_SETTING(n) (*(uint16_t*)&lcd_cache[(n) * sizeof(uint16_t)])

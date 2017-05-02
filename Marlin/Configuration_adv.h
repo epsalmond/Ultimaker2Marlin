@@ -213,7 +213,7 @@
 //=============================Additional Features===========================
 //===========================================================================
 
-#define SD_FINISHED_STEPPERRELEASE true  //if sd support and the file is finished: disable steppers?
+#define SD_FINISHED_STEPPERRELEASE false  //if sd support and the file is finished: disable steppers?
 #define SD_FINISHED_RELEASECOMMAND "M84" // You might want to keep the z enabled so your bed stays in place.
 
 // The hardware watchdog should reset the Microcontroller disabling all outputs, in case the firmware gets stuck and doesn't do temperature regulation.
@@ -233,7 +233,7 @@
 // it can e.g. be used to change z-positions in the print startup phase in real-time
 // does not respect endstops!
 // #define BABYSTEPPING
-#if ENABLED(BABYSTEPPING)
+#if defined(BABYSTEPPING)
   #define BABYSTEP_XY  //not only z, but also XY in the menu. more clutter, more functions
   #define BABYSTEP_INVERT_Z false  //true for inverse movements in Z
 
@@ -313,12 +313,12 @@ const int8_t dropsegments=5; //everything with less than this number of steps wi
 #endif
 
 
-//The ASCII buffer for recieving from the serial:
+//The ASCII buffer for receiving from the serial:
 #define MAX_CMD_SIZE 96
 #define BUFSIZE 8
+#define BUFMASK 0x07
 
-
-// Firmware based and LCD controled retract
+// Firmware based and LCD controlled retract
 // M207 and M208 can be used to define parameters for the retraction.
 // The retraction can be called by the slicer using G10 and G11
 // until then, intended retractions can be detected by moves that only extrude and the direction.

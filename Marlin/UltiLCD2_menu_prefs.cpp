@@ -21,7 +21,7 @@ uint16_t lcd_timeout = LED_DIM_TIME;
 uint8_t lcd_contrast = 0xDF;
 uint8_t lcd_sleep_contrast = 0;
 uint8_t led_sleep_glow = 0;
-uint8_t expert_flags = FLAG_PID_NOZZLE;
+uint8_t control_flags = FLAG_PID_NOZZLE;
 float end_of_print_retraction = END_OF_PRINT_RETRACTION;
 uint8_t heater_check_temp = MAX_HEATING_TEMPERATURE_INCREASE;
 uint8_t heater_check_time = MAX_HEATING_CHECK_MILLIS / 1000;
@@ -34,6 +34,8 @@ uint16_t motor_current_e2 = 0;
 #if EXTRUDERS > 1
 float e2_steps_per_unit = 282.0f;
 #endif
+
+uint8_t axis_direction = DEFAULT_AXIS_DIR;
 
 uint16_t led_timeout = LED_DIM_TIME;
 uint8_t led_sleep_brightness = 0;
@@ -521,13 +523,16 @@ void lcd_menu_axeslimit()
 
 static void lcd_cancel_steps()
 {
-    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
+    plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS], active_extruder, true);
     menu.return_to_previous();
 }
 
 static void lcd_store_steps()
 {
     Config_StoreSettings();
+#if EXTRUDERS > 1
+    SET_STEPS_E2(e2_steps_per_unit);
+#endif // EXTRUDERS
     lcd_cancel_steps();
 }
 
@@ -546,10 +551,17 @@ static void lcd_steps_z()
     lcd_tune_value(axis_steps_per_unit[Z_AXIS], 0.0f, 9999.0f, 0.01f);
 }
 
-static void lcd_steps_e()
+static void lcd_steps_e1()
 {
     lcd_tune_value(axis_steps_per_unit[E_AXIS], 0.0f, 9999.0f, 0.01f);
 }
+
+#if EXTRUDERS > 1
+static void lcd_steps_e2()
+{
+    lcd_tune_value(e2_steps_per_unit, 0.0f, 9999.0f, 0.01f);
+}
+#endif // EXTRUDERS
 
 // create menu options for "axis steps/mm"
 static const menu_t & get_steps_menuoption(uint8_t nr, menu_t &opt)
@@ -582,9 +594,16 @@ static const menu_t & get_steps_menuoption(uint8_t nr, menu_t &opt)
     }
     else if (nr == index++)
     {
-        // e steps
-        opt.setData(MENU_INPLACE_EDIT, lcd_steps_e, 5);
+        // e1 steps
+        opt.setData(MENU_INPLACE_EDIT, lcd_steps_e1, 5);
     }
+#if EXTRUDERS > 1
+    else if (nr == index++)
+    {
+        // e1 steps
+        opt.setData(MENU_INPLACE_EDIT, lcd_steps_e2, 5);
+    }
+#endif // EXTRUDERS
     return opt;
 }
 
@@ -629,6 +648,98 @@ static void drawStepsSubmenu(uint8_t nr, uint8_t &flags)
             lcd_lib_draw_gfx(LCD_GFX_WIDTH/2 + LCD_CHAR_MARGIN_LEFT + 2*LCD_CHAR_SPACING, BOTTOM_MENU_YPOS, backGfx);
         }
     }
+#if EXTRUDERS > 1
+    else if (nr == index++)
+    {
+        // x steps
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            lcd_lib_draw_string_leftP(5, PSTR("X steps/mm"));
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_string_leftP(18, PSTR("X"));
+        float_to_string2(axis_steps_per_unit[X_AXIS], buffer, NULL);
+        LCDMenu::drawMenuString((LCD_CHAR_MARGIN_LEFT*2)+LCD_CHAR_SPACING
+                                , 18
+                                , LCD_CHAR_SPACING*7
+                                , LCD_CHAR_HEIGHT
+                                , buffer
+                                , ALIGN_RIGHT | ALIGN_VCENTER
+                                , flags);
+    }
+    else if (nr == index++)
+    {
+        // y steps
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            lcd_lib_draw_string_leftP(5, PSTR("Y steps/mm"));
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_string_leftP(28, PSTR("Y"));
+        float_to_string2(axis_steps_per_unit[Y_AXIS], buffer, NULL);
+        LCDMenu::drawMenuString((LCD_CHAR_MARGIN_LEFT*2)+LCD_CHAR_SPACING
+                                , 28
+                                , LCD_CHAR_SPACING*7
+                                , LCD_CHAR_HEIGHT
+                                , buffer
+                                , ALIGN_RIGHT | ALIGN_VCENTER
+                                , flags);
+    }
+    else if (nr == index++)
+    {
+        // z steps
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            lcd_lib_draw_string_leftP(5, PSTR("Z steps/mm"));
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_string_leftP(38, PSTR("Z"));
+        float_to_string2(axis_steps_per_unit[Z_AXIS], buffer, NULL);
+        LCDMenu::drawMenuString((LCD_CHAR_MARGIN_LEFT*2)+LCD_CHAR_SPACING
+                                , 38
+                                , LCD_CHAR_SPACING*7
+                                , LCD_CHAR_HEIGHT
+                                , buffer
+                                , ALIGN_RIGHT | ALIGN_VCENTER
+                                , flags);
+    }
+    else if (nr == index++)
+    {
+        // e1 steps
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            lcd_lib_draw_string_leftP(5, PSTR("Extruder 1 steps/mm"));
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_stringP(LCD_GFX_WIDTH - (LCD_CHAR_MARGIN_RIGHT*2) - (LCD_CHAR_SPACING*9), 18, PSTR("E1"));
+        float_to_string2(axis_steps_per_unit[E_AXIS], buffer, NULL);
+        LCDMenu::drawMenuString(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*7)
+                                , 18
+                                , LCD_CHAR_SPACING*7
+                                , LCD_CHAR_HEIGHT
+                                , buffer
+                                , ALIGN_RIGHT | ALIGN_VCENTER
+                                , flags);
+    }
+    else if (nr == index++)
+    {
+        // e2 steps
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            lcd_lib_draw_string_leftP(5, PSTR("Extruder 2 steps/mm"));
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_stringP(LCD_GFX_WIDTH - (LCD_CHAR_MARGIN_RIGHT*2) - (LCD_CHAR_SPACING*9), 28, PSTR("E2"));
+        float_to_string2(e2_steps_per_unit, buffer, NULL);
+        LCDMenu::drawMenuString(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*7)
+                                , 28
+                                , LCD_CHAR_SPACING*7
+                                , LCD_CHAR_HEIGHT
+                                , buffer
+                                , ALIGN_RIGHT | ALIGN_VCENTER
+                                , flags);
+    }
+#else
     else if (nr == index++)
     {
         // x steps
@@ -701,6 +812,7 @@ static void drawStepsSubmenu(uint8_t nr, uint8_t &flags)
                                 , ALIGN_RIGHT | ALIGN_VCENTER
                                 , flags);
     }
+#endif // EXTRUDERS
 }
 
 void lcd_menu_steps()
@@ -708,15 +820,375 @@ void lcd_menu_steps()
     lcd_basic_screen();
     lcd_lib_draw_hline(3, 124, 13);
 
-    menu.process_submenu(get_steps_menuoption, 6);
+    menu.process_submenu(get_steps_menuoption, 5+EXTRUDERS);
 
     uint8_t flags = 0;
-    for (uint8_t index=0; index<6; ++index) {
+    for (uint8_t index=0; index<5+EXTRUDERS; ++index) {
         menu.drawSubMenu(drawStepsSubmenu, index, flags);
     }
     if (!(flags & MENU_STATUSLINE))
     {
         lcd_lib_draw_string_leftP(5, PSTR("Axis steps/mm"));
+    }
+
+    lcd_lib_update_screen();
+}
+
+static void lcd_store_axisdir()
+{
+    SET_AXIS_DIRECTION(axis_direction);
+    menu.return_to_previous();
+}
+
+static void lcd_axisdir_x()
+{
+    axis_direction ^= 0x01;
+}
+
+static void lcd_axisdir_y()
+{
+    axis_direction ^= 0x02;
+}
+
+static void lcd_axisdir_z()
+{
+    axis_direction ^= 0x04;
+}
+
+static void lcd_axisdir_e1()
+{
+    axis_direction ^= 0x08;
+}
+
+#if EXTRUDERS > 1
+static void lcd_axisdir_e2()
+{
+    axis_direction ^= 0x10;
+}
+#endif // EXTRUDERS
+
+// create menu options for "axis steps/mm"
+static const menu_t & get_axisdir_menuoption(uint8_t nr, menu_t &opt)
+{
+    uint8_t index(0);
+    if (nr == index++)
+    {
+        // STORE
+        opt.setData(MENU_NORMAL, lcd_store_axisdir);
+    }
+    else if (nr == index++)
+    {
+        // RETURN
+        opt.setData(MENU_NORMAL, lcd_change_to_previous_menu);
+    }
+    else if (nr == index++)
+    {
+        // invert x
+        opt.setData(MENU_NORMAL, lcd_axisdir_x);
+    }
+    else if (nr == index++)
+    {
+        // invert y
+        opt.setData(MENU_NORMAL, lcd_axisdir_y);
+    }
+    else if (nr == index++)
+    {
+        // invert z
+        opt.setData(MENU_NORMAL, lcd_axisdir_z);
+    }
+    else if (nr == index++)
+    {
+        // invert e1
+        opt.setData(MENU_NORMAL, lcd_axisdir_e1);
+    }
+#if EXTRUDERS > 1
+    else if (nr == index++)
+    {
+        // invert e2
+        opt.setData(MENU_NORMAL, lcd_axisdir_e2);
+    }
+#endif // EXTRUDERS
+    return opt;
+}
+
+static void drawInvertStatusP(const char * strAxis, bool bInvert)
+{
+    uint8_t xPos(LCD_CHAR_MARGIN_LEFT);
+    lcd_lib_draw_string_leftP(5, PSTR("Invert"));
+    xPos += LCD_CHAR_SPACING*7;
+    lcd_lib_draw_stringP(xPos, 5, strAxis);
+    xPos += LCD_CHAR_SPACING*(strlen_P(strAxis));
+    lcd_lib_draw_stringP(xPos, 5, PSTR(":"));
+    xPos += LCD_CHAR_SPACING*2;
+    lcd_lib_draw_stringP(xPos, 5, bInvert?PSTR("yes"):PSTR("no"));
+}
+
+static void drawAxisDirSubmenu(uint8_t nr, uint8_t &flags)
+{
+    uint8_t index(0);
+    if (nr == index++)
+    {
+        // Store
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_draw_string_leftP(5, PSTR("Store invert flags"));
+            flags |= MENU_STATUSLINE;
+        }
+        LCDMenu::drawMenuString_P(LCD_CHAR_MARGIN_LEFT
+                                , BOTTOM_MENU_YPOS
+                                , 52
+                                , LCD_CHAR_HEIGHT
+                                , PSTR("STORE")
+                                , ALIGN_CENTER
+                                , flags);
+    }
+    else if (nr == index++)
+    {
+        // RETURN
+        LCDMenu::drawMenuBox(LCD_GFX_WIDTH/2 + 2*LCD_CHAR_MARGIN_LEFT
+                           , BOTTOM_MENU_YPOS
+                           , 52
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_draw_string_leftP(5, PSTR("Click to return"));
+            flags |= MENU_STATUSLINE;
+            lcd_lib_clear_stringP(LCD_GFX_WIDTH/2 + LCD_CHAR_MARGIN_LEFT + 4*LCD_CHAR_SPACING, BOTTOM_MENU_YPOS, PSTR("BACK"));
+            lcd_lib_clear_gfx(LCD_GFX_WIDTH/2 + LCD_CHAR_MARGIN_LEFT + 2*LCD_CHAR_SPACING, BOTTOM_MENU_YPOS, backGfx);
+        }
+        else
+        {
+            lcd_lib_draw_stringP(LCD_GFX_WIDTH/2 + LCD_CHAR_MARGIN_LEFT + 4*LCD_CHAR_SPACING, BOTTOM_MENU_YPOS, PSTR("BACK"));
+            lcd_lib_draw_gfx(LCD_GFX_WIDTH/2 + LCD_CHAR_MARGIN_LEFT + 2*LCD_CHAR_SPACING, BOTTOM_MENU_YPOS, backGfx);
+        }
+    }
+#if EXTRUDERS > 1
+    else if (nr == index++)
+    {
+        // invert x
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("X"), INVERT_X_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_string_leftP(18, PSTR("X"));
+        LCDMenu::drawMenuBox(LCD_CHAR_MARGIN_LEFT+LCD_CHAR_SPACING*2
+                           , 18
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(9+LCD_CHAR_SPACING*2, 18, INVERT_X_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(9+LCD_CHAR_SPACING*2, 18, INVERT_X_DIR?checkbox_on:checkbox_off);
+        }
+    }
+    else if (nr == index++)
+    {
+        // invert y
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("Y"), INVERT_Y_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_string_leftP(28, PSTR("Y"));
+        LCDMenu::drawMenuBox(LCD_CHAR_MARGIN_LEFT+LCD_CHAR_SPACING*2
+                           , 28
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(9+LCD_CHAR_SPACING*2, 28, INVERT_Y_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(9+LCD_CHAR_SPACING*2, 28, INVERT_Y_DIR?checkbox_on:checkbox_off);
+        }
+    }
+    else if (nr == index++)
+    {
+        // invert z
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("Z"), INVERT_Z_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_string_leftP(38, PSTR("Z"));
+        LCDMenu::drawMenuBox(LCD_CHAR_MARGIN_LEFT+LCD_CHAR_SPACING*2
+                           , 38
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(9+LCD_CHAR_SPACING*2, 38, INVERT_Z_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(9+LCD_CHAR_SPACING*2, 38, INVERT_Z_DIR?checkbox_on:checkbox_off);
+        }
+    }
+    else if (nr == index++)
+    {
+        // invert e0
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("Extr.1"), INVERT_E0_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_stringP(LCD_GFX_WIDTH - (LCD_CHAR_MARGIN_RIGHT*2) - (LCD_CHAR_SPACING*9), 18, PSTR("E1"));
+        LCDMenu::drawMenuBox(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*7)
+                           , 18
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*6)-1, 18, INVERT_E0_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*6)-1, 18, INVERT_E0_DIR?checkbox_on:checkbox_off);
+        }
+    }
+    else if (nr == index++)
+    {
+        // invert e1
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("Extr.2"), INVERT_E1_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_stringP(LCD_GFX_WIDTH - (LCD_CHAR_MARGIN_RIGHT*2) - (LCD_CHAR_SPACING*9), 28, PSTR("E2"));
+        LCDMenu::drawMenuBox(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*7)
+                           , 28
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*6)-1, 28, INVERT_E1_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*6)-1, 28, INVERT_E1_DIR?checkbox_on:checkbox_off);
+        }
+    }
+#else
+    else if (nr == index++)
+    {
+        // invert x steps
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("X"), INVERT_X_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_string_leftP(20, PSTR("X"));
+        LCDMenu::drawMenuBox(LCD_CHAR_MARGIN_LEFT+LCD_CHAR_SPACING*2
+                           , 20
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(9+LCD_CHAR_SPACING*2, 20, INVERT_X_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(9+LCD_CHAR_SPACING*2, 20, INVERT_X_DIR?checkbox_on:checkbox_off);
+        }
+    }
+    else if (nr == index++)
+    {
+        // invert y
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("Y"), INVERT_Y_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_string_leftP(32, PSTR("Y"));
+        LCDMenu::drawMenuBox(LCD_CHAR_MARGIN_LEFT+LCD_CHAR_SPACING*2
+                           , 32
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(9+LCD_CHAR_SPACING*2, 32, INVERT_Y_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(9+LCD_CHAR_SPACING*2, 32, INVERT_Y_DIR?checkbox_on:checkbox_off);
+        }
+    }
+    else if (nr == index++)
+    {
+        // invert z
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("Z"), INVERT_Z_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_stringP(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*9), 20, PSTR("Z"));
+        LCDMenu::drawMenuBox(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*7)
+                           , 20
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*6)-1, 20, INVERT_Z_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*6)-1, 20, INVERT_Z_DIR?checkbox_on:checkbox_off);
+        }
+    }
+    else if (nr == index++)
+    {
+        // invert e
+        if ((flags & MENU_ACTIVE) | (flags & MENU_SELECTED))
+        {
+            drawInvertStatusP(PSTR("Extruder"), INVERT_E0_DIR);
+            flags |= MENU_STATUSLINE;
+        }
+        lcd_lib_draw_stringP(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*9), 32, PSTR("E"));
+        LCDMenu::drawMenuBox(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*7)
+                           , 32
+                           , 3*LCD_CHAR_SPACING
+                           , LCD_CHAR_HEIGHT
+                           , flags);
+        if (flags & MENU_SELECTED)
+        {
+            lcd_lib_clear_gfx(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*6)-1, 32, INVERT_E0_DIR?checkbox_on:checkbox_off);
+        }
+        else
+        {
+            lcd_lib_draw_gfx(LCD_GFX_WIDTH - LCD_CHAR_MARGIN_RIGHT - (LCD_CHAR_SPACING*6)-1, 32, INVERT_E0_DIR?checkbox_on:checkbox_off);
+        }
+    }
+#endif // EXTRUDERS
+}
+
+void lcd_menu_axisdirection()
+{
+    lcd_basic_screen();
+    lcd_lib_draw_hline(3, 124, 13);
+
+    menu.process_submenu(get_axisdir_menuoption, 5+EXTRUDERS);
+
+    uint8_t flags = 0;
+    for (uint8_t index=0; index<5+EXTRUDERS; ++index) {
+        menu.drawSubMenu(drawAxisDirSubmenu, index, flags);
+    }
+    if (!(flags & MENU_STATUSLINE))
+    {
+        lcd_lib_draw_string_leftP(5, PSTR("Invert axis"));
     }
 
     lcd_lib_update_screen();
@@ -1555,13 +2027,13 @@ void init_swap_menu()
 
 static void lcd_store_swap()
 {
-    SET_EXPERT_FLAGS(expert_flags);
+    SET_CONTROL_FLAGS(control_flags);
     menu.return_to_previous();
 }
 
 static void lcd_swap_extruders()
 {
-    expert_flags ^= FLAG_SWAP_EXTRUDERS;
+    control_flags ^= FLAG_SWAP_EXTRUDERS;
 }
 
 // create menu options for "acceleration and jerk"
@@ -2654,7 +3126,7 @@ static void lcd_store_pidbed()
     pidBed[2] = bedKd;
     eeprom_write_block(pidBed, (uint8_t*)EEPROM_PID_BED, sizeof(pidBed));
 
-    SET_EXPERT_FLAGS(expert_flags);
+    SET_CONTROL_FLAGS(control_flags);
     menu.return_to_previous();
 }
 
@@ -2662,12 +3134,12 @@ static void lcd_toggle_pid_bed()
 {
     if (pidTempBed())
     {
-        expert_flags &= ~FLAG_PID_BED;
+        control_flags &= ~FLAG_PID_BED;
         menu.set_selection(2);
     }
     else
     {
-        expert_flags |= FLAG_PID_BED;
+        control_flags |= FLAG_PID_BED;
         menu.set_selection(3);
     }
 }

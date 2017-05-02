@@ -62,6 +62,15 @@ char* float_to_string2(float f, char* temp_buffer, const char* p_postfix = NULL,
 #define LCD_CHAR_SPACING 6
 #define LCD_CHAR_HEIGHT 7
 
+#define LINE_ENTRY_STEP      2
+#define LINE_ENTRY_WAIT_END 24
+#define LINE_ENTRY_GFX_LENGHT  (LCD_GFX_WIDTH-LCD_CHAR_MARGIN_RIGHT-LCD_CHAR_MARGIN_LEFT)
+#define LINE_ENTRY_TEXT_LENGHT (LINE_ENTRY_GFX_LENGHT / LCD_CHAR_SPACING)
+#define LINE_ENTRY_TEXT_OFFSET() ((lineEntryPos%LCD_CHAR_SPACING == 0) ? 0 : -1)
+#define LINE_ENTRY_TEXT_BEGIN()  ((lineEntryPos + LCD_CHAR_SPACING-1) / LCD_CHAR_SPACING)
+#define LINE_ENTRY_GFX_BEGIN()   (LCD_CHAR_SPACING-1 - (lineEntryPos + LCD_CHAR_SPACING-1) % LCD_CHAR_SPACING)
+#define LINE_ENTRY_MAX_STEP(text_length) ((text_length) * LCD_CHAR_SPACING)
+
 FORCE_INLINE void lcd_lib_draw_string_left(uint8_t y, const char* str) { lcd_lib_draw_string(LCD_CHAR_MARGIN_LEFT, y, str); }
 FORCE_INLINE void lcd_lib_draw_string_leftP(uint8_t y, const char* pstr) { lcd_lib_draw_stringP(LCD_CHAR_MARGIN_LEFT, y, pstr); }
 FORCE_INLINE void lcd_lib_draw_string_right(uint8_t x, uint8_t y, const char* str) { lcd_lib_draw_string(x - (strlen(str) * LCD_CHAR_SPACING), y, str); }
@@ -77,7 +86,7 @@ FORCE_INLINE void lcd_lib_draw_string_rightP(uint8_t x, uint8_t y, const char* p
 // #define CUBED_SYMBOL "\x1D"
 #define UNIT_ACCELERATION "mm/s\x1E"
 
-#define MILLISECONDS_PER_SECOND 1000UL
+#define MILLISECONDS_PER_SECOND 1000U
 #define MILLISECONDS_PER_MINUTE (MILLISECONDS_PER_SECOND*60UL)
 
 #define LED_NORMAL if (sleep_state & SLEEP_LED_OFF) { lcd_lib_led_color(0,0,0); } else { lcd_lib_led_color(40,40,54); } led_update();

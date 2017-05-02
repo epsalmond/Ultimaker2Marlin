@@ -71,23 +71,21 @@ typedef struct {
 void plan_init();
 
 // Add a new linear movement to the buffer. x, y and z is the signed, absolute target position in
-// millimaters. Feed rate specifies the speed of the motion.
-void plan_buffer_line(const float &x, const float &y, const float &z, const float &e, float feed_rate, const uint8_t &extruder);
+// millimeters. Feed rate specifies the speed of the motion.
+void plan_buffer_line(const float &x, const float &y, const float &z, const float &e, float feed_rate, const uint8_t extruder);
 
 // Set position. Used for G92 instructions.
-void plan_set_position(const float &x, const float &y, const float &z, const float &e);
-void plan_set_e_position(const float &e);
+void plan_set_position(const float &x, const float &y, const float &z, const float &e, const uint8_t extruder, bool bSynchronize);
+void plan_set_e_position(const float &e, const uint8_t extruder, bool bSynchronize);
 
-void plan_get_position(float *pos);
 
 void check_axes_activity();
 uint8_t movesplanned(); //return the nr of buffered moves
 
 extern unsigned long minsegmenttime;
-extern float max_feedrate[4]; // set the max speeds
-extern float axis_steps_per_unit[4];
+extern float max_feedrate[NUM_AXIS]; // set the max speeds
 extern float volume_to_filament_length[EXTRUDERS];
-extern unsigned long max_acceleration_units_per_sq_second[4]; // Use M201 to override by software
+extern unsigned long max_acceleration_units_per_sq_second[NUM_AXIS]; // Use M201 to override by software
 extern float minimumfeedrate;
 extern float acceleration;         // Normal acceleration mm/s^2  THIS IS THE DEFAULT ACCELERATION for all moves. M204 SXXXX
 extern float retract_acceleration; //  mm/s^2   filament pull-pack and push-forward  while standing still in the other axis M204 TXXXX
@@ -95,7 +93,14 @@ extern float max_xy_jerk; //speed than can be stopped at once, if i understand c
 extern float max_z_jerk;
 extern float max_e_jerk;
 extern float mintravelfeedrate;
-extern unsigned long axis_steps_per_sqr_second[NUM_AXIS];
+extern unsigned long axis_steps_per_sqr_second[NUM_AXIS+EXTRUDERS-1];
+extern float axis_steps_per_unit[NUM_AXIS];
+#if EXTRUDERS > 1
+extern float e2_steps_per_unit;
+FORCE_INLINE float e_steps_per_unit(uint8_t e) {return (e ? e2_steps_per_unit : axis_steps_per_unit[E_AXIS]);}
+#else
+FORCE_INLINE float e_steps_per_unit(uint8_t e) {return axis_steps_per_unit[E_AXIS];}
+#endif
 
 #ifdef AUTOTEMP
     extern bool autotemp_enabled;
@@ -104,14 +109,11 @@ extern unsigned long axis_steps_per_sqr_second[NUM_AXIS];
     extern float autotemp_factor;
 #endif
 
-
-
-
-extern block_t block_buffer[BLOCK_BUFFER_SIZE];            // A ring buffer for motion instfructions
+extern block_t block_buffer[BLOCK_BUFFER_SIZE];            // A ring buffer for motion instructions
 extern volatile unsigned char block_buffer_head;           // Index of the next block to be pushed
 extern volatile unsigned char block_buffer_tail;
 // Called when the current block is no longer needed. Discards the block and makes the memory
-// availible for new blocks.
+// available for new blocks.
 FORCE_INLINE void plan_discard_current_block()
 {
   if (block_buffer_head != block_buffer_tail) {
@@ -142,6 +144,7 @@ FORCE_INLINE bool blocks_queued()
 
 #ifdef PREVENT_DANGEROUS_EXTRUDE
 void set_extrude_min_temp(float temp);
+float get_extrude_min_temp();
 #endif
 
 void reset_acceleration_rates();

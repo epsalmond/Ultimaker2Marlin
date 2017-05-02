@@ -17,11 +17,11 @@
 #include "tinkergnome.h"
 
 // coefficient for the exponential moving average
-#define ALPHA 0.05f
-#define ONE_MINUS_ALPHA 0.95f
+// K1 defined in Configuration.h in the PID settings
+#define K2 (1.0-K1)
+
 #define LCD_CHARS_PER_LINE 20
 
-unsigned long lastSerialCommandTime;
 uint8_t led_brightness_level = 100;
 uint8_t led_mode = LED_MODE_ALWAYS_ON;
 float dsp_temperature[EXTRUDERS] = { 20.0 };
@@ -63,7 +63,6 @@ void lcd_init()
     menu.init_menu(menu_t(lcd_menu_main, MAIN_MENU_ITEM_POS(0)), false);
     menu.add_menu(menu_t(lcd_menu_startup), false);
     analogWrite(LED_PIN, 0);
-    lastSerialCommandTime = millis() - SERIAL_CONTROL_TIMEOUT;
 }
 
 void lcd_update()
@@ -139,37 +138,41 @@ void lcd_update()
         LED_GLOW_ERROR
         lcd_lib_update_screen();
     }
-    else if (HAS_SERIAL_CMD)
-    {
-        if (!(sleep_state & SLEEP_SERIAL_SCREEN))
-        {
-            // show usb printing screen during incoming serial communication
-            menu.add_menu(menu_t(lcd_menu_printing_tg, MAIN_MENU_ITEM_POS(1)), false);
-            sleep_state |= SLEEP_SERIAL_SCREEN;
-        }
-        menu.processEvents();
-    }
     else
     {
-        if (sleep_state & SLEEP_SERIAL_SCREEN)
+        if (!card.sdprinting())
         {
-            // hide usb printing screen
-            sleep_state &= ~SLEEP_SERIAL_SCREEN;
-            menu.removeMenu(lcd_menu_printing_tg);
+            if (HAS_SERIAL_CMD)
+            {
+                if (!(sleep_state & SLEEP_SERIAL_SCREEN))
+                {
+                    // show usb printing screen during incoming serial communication
+                    menu.add_menu(menu_t(lcd_menu_printing_tg, MAIN_MENU_ITEM_POS(1)), false);
+                    sleep_state |= SLEEP_SERIAL_SCREEN;
+                }
+            }
+            else if (sleep_state & SLEEP_SERIAL_SCREEN)
+            {
+                // hide usb printing screen
+                sleep_state &= ~SLEEP_SERIAL_SCREEN;
+                menu.removeMenu(lcd_menu_printing_tg);
+            }
         }
         menu.processEvents();
-        if (postMenuCheck && (printing_state != PRINT_STATE_ABORT))
-        {
-            postMenuCheck();
-        }
     }
+
+    if (postMenuCheck && (printing_state != PRINT_STATE_ABORT))
+    {
+        postMenuCheck();
+    }
+
     // refresh the displayed temperatures
     for(uint8_t e=0; e<EXTRUDERS; ++e)
     {
-        dsp_temperature[e] = (ALPHA * current_temperature[e]) + (ONE_MINUS_ALPHA * dsp_temperature[e]);
+        dsp_temperature[e] = (K2 * current_temperature[e]) + (K1 * dsp_temperature[e]);
     }
 #if TEMP_SENSOR_BED != 0
-    dsp_temperature_bed = (ALPHA * current_temperature_bed) + (ONE_MINUS_ALPHA * dsp_temperature_bed);
+    dsp_temperature_bed = (K2 * current_temperature_bed) + (K1 * dsp_temperature_bed);
 #endif
 }
 
@@ -249,8 +252,8 @@ static void lcd_menu_special_startup()
 
 void doCooldown()
 {
-    for(uint8_t n=0; n<EXTRUDERS; n++)
-        setTargetHotend(0, n);
+    for(uint8_t n=0; n<EXTRUDERS; ++n)
+        cooldownHotend(n);
 #if TEMP_SENSOR_BED != 0
     setTargetBed(0);
 #endif
